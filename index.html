@@ -192,7 +192,7 @@
   const MAX_LEAN = 0.28;
   const LEAN_GAIN = 0.55;
   const HEIGHT_LEAN_POW = 2.05;
-  const SPEED_TIERS = [1.0, 2.0, 3.2, 4.6, 6.0, 7.5];
+  const SPEED_TIERS = [1.0, 1.22, 1.48, 1.78, 2.12, 2.45, 2.75, 3.05];
   const CRATE_PALETTES = [
     { body: '#e0b46a', dark: '#a06a28', light: '#f6e2b0', stripe: '#b87a38', nail: '#5a4030' },
     { body: '#d4a060', dark: '#8e6020', light: '#f0d49a', stripe: '#a86c30', nail: '#4a3020' },
@@ -258,15 +258,26 @@
     const g = actx.createGain(); g.gain.value = vol || 0.12;
     src.connect(f); f.connect(g); g.connect(master); src.start();
   }
-  function sfxDrop() { tone(240, 0.07, 'triangle', 0.1, 110); noiseBurst(0.05, 0.07, 700); }
+  function sfxDrop() {
+    tone(320, 0.05, 'square', 0.07, 140);
+    noiseBurst(0.04, 0.08, 900);
+  }
   function sfxPlace() {
-    tone(180, 0.08, 'square', 0.08, 120);
-    tone(320, 0.1, 'triangle', 0.1);
-    noiseBurst(0.09, 0.14, 380);
+    // Punchy wood thunk + bright click
+    tone(140, 0.07, 'square', 0.14, 70);
+    tone(420, 0.05, 'triangle', 0.12, 280);
+    tone(880, 0.03, 'sine', 0.07);
+    noiseBurst(0.055, 0.2, 520);
   }
   function sfxPerfect() {
-    [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => tone(f, 0.14, 'sine', 0.16), i * 70));
-    noiseBurst(0.08, 0.06, 1200);
+    // Bright playful sparkle arpeggio
+    const notes = [523, 659, 784, 1046, 1319];
+    notes.forEach((f, i) => setTimeout(() => {
+      tone(f, 0.11, 'square', 0.12 - i * 0.012);
+      tone(f * 2, 0.08, 'sine', 0.07);
+    }, i * 48));
+    noiseBurst(0.06, 0.1, 1800);
+    setTimeout(() => noiseBurst(0.04, 0.06, 2400), 40);
   }
   function sfxGameOver() {
     tone(280, 0.4, 'sawtooth', 0.1, 55);
@@ -279,30 +290,61 @@
   }
   function startMusic() {
     if (!audioReady || muted || musicTimer) return;
-    const chords = [[196, 247, 294], [220, 277, 330], [174, 220, 262], [165, 196, 247]];
+    // Bright playful C-major loop: bounce bass + plucky lead + light hats
+    // C5 Am F G  (melody-friendly, upbeat)
+    const bassLine = [130.81, 110.00, 87.31, 98.00]; // C3 A2 F2 G2
+    const leadPat = [
+      523.25, 659.25, 783.99, 659.25, // C5 E5 G5 E5
+      587.33, 698.46, 880.00, 698.46, // D5 F5 A5 F5
+      523.25, 698.46, 783.99, 1046.5, // C5 F5 G5 C6
+      659.25, 783.99, 987.77, 783.99, // E5 G5 B5 G5
+    ];
     let step = 0;
     musicNodes = [];
-    const drone = actx.createOscillator();
-    const dg = actx.createGain();
-    drone.type = 'sine'; drone.frequency.value = 98; dg.gain.value = 0.035;
-    drone.connect(dg); dg.connect(master); drone.start(); musicNodes.push(drone);
+    // Soft bright pad (not sleepy drone)
     const pad = actx.createOscillator();
     const pg = actx.createGain();
-    pad.type = 'triangle'; pad.frequency.value = 147; pg.gain.value = 0.02;
+    pad.type = 'triangle'; pad.frequency.value = 261.63; pg.gain.value = 0.018;
     pad.connect(pg); pg.connect(master); pad.start(); musicNodes.push(pad);
+    const pad2 = actx.createOscillator();
+    const pg2 = actx.createGain();
+    pad2.type = 'sine'; pad2.frequency.value = 329.63; pg2.gain.value = 0.012;
+    pad2.connect(pg2); pg2.connect(master); pad2.start(); musicNodes.push(pad2);
     musicTimer = setInterval(() => {
       if (!audioReady || muted || !actx) return;
-      const ch = chords[Math.floor(step / 4) % chords.length];
-      const f = ch[step % 3];
       const t0 = actx.currentTime;
-      const o = actx.createOscillator(); const g = actx.createGain();
-      o.type = step % 4 === 0 ? 'triangle' : 'sine';
-      o.frequency.value = f;
-      envGain(g, t0, 0.055, 0.65, 0.04);
-      o.connect(g); g.connect(master); o.start(t0); o.stop(t0 + 0.7);
-      if (step % 8 === 0) tone(f * 2, 0.2, 'sine', 0.03);
+      const bar = Math.floor(step / 4) % 4;
+      const beat = step % 4;
+
+      // Bouncy bass on every beat
+      const bf = bassLine[bar];
+      const bo = actx.createOscillator(); const bg = actx.createGain();
+      bo.type = 'square';
+      bo.frequency.setValueAtTime(bf, t0);
+      bo.frequency.exponentialRampToValueAtTime(bf * 0.92, t0 + 0.18);
+      envGain(bg, t0, beat === 0 ? 0.07 : 0.045, 0.22, 0.01);
+      bo.connect(bg); bg.connect(master); bo.start(t0); bo.stop(t0 + 0.25);
+
+      // Plucky lead melody
+      const lf = leadPat[step % leadPat.length];
+      const lo = actx.createOscillator(); const lg = actx.createGain();
+      lo.type = 'triangle';
+      lo.frequency.value = lf;
+      envGain(lg, t0, 0.055, 0.2, 0.008);
+      lo.connect(lg); lg.connect(master); lo.start(t0); lo.stop(t0 + 0.22);
+      // Octave sparkle on downbeats
+      if (beat === 0 || beat === 2) {
+        const so = actx.createOscillator(); const sg = actx.createGain();
+        so.type = 'sine'; so.frequency.value = lf * 2;
+        envGain(sg, t0, 0.028, 0.12, 0.005);
+        so.connect(sg); sg.connect(master); so.start(t0); so.stop(t0 + 0.14);
+      }
+
+      // Light playful hat / clap noise
+      noiseBurst(beat === 0 ? 0.04 : 0.025, beat === 0 ? 0.045 : 0.028, beat % 2 === 0 ? 3200 : 5000);
+
       step++;
-    }, 480);
+    }, 290);
   }
   function setMuted(m) {
     muted = m;
@@ -328,7 +370,9 @@
   }
   function paletteFor(i) { return CRATE_PALETTES[i % CRATE_PALETTES.length]; }
   function speedForNextFloor() {
-    return SPEED_TIERS[Math.min(Math.floor(blocks.length / 10), SPEED_TIERS.length - 1)];
+    // Soft ramp: ~12 floors per tier; floor ~40 ≈ 1.78 (was 6.0); soft-cap 3.05
+    const floor = Math.max(0, blocks.length);
+    return SPEED_TIERS[Math.min(Math.floor(floor / 12), SPEED_TIERS.length - 1)];
   }
   function basePivot() { const b = blocks[0]; return { x: b.x + b.w/2, y: b.y + b.h }; }
 
