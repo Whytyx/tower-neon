@@ -59,13 +59,11 @@
   }
   @keyframes pulseHint { 0%,100%{opacity:.4; transform:scale(1)} 50%{opacity:1; transform:scale(1.03)} }
   #homeTip {
-    position: absolute; bottom: max(52px, calc(env(safe-area-inset-bottom) + 40px));
-    left: 12px; right: 12px; text-align: center;
-    font-size: 12px; line-height: 1.45; color: #5a3810; font-weight: 700;
-    background: rgba(255,248,230,0.92); border: 2px solid #c49a5a; border-radius: 12px;
-    padding: 8px 12px; box-shadow: 0 3px 0 rgba(107,68,32,0.35);
-    pointer-events: none;
+    display: none; margin: 14px 0 0; padding: 0;
+    font-size: 11px; line-height: 1.4; color: #8b5a2b; font-weight: 700;
+    letter-spacing: 0.02em; opacity: 0.85;
   }
+  #homeTip.show { display: block; }
   #overlay {
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
     background: rgba(35,22,8,0.5); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
@@ -155,7 +153,6 @@
       <p class="subtitle">Stack wobbly wooden crates</p>
       <div class="best-banner">🏆 BEST <span id="startBest">0</span></div>
       <button class="btn" id="startBtn">PLAY</button>
-      <p id="homeTip">📱 เพิ่มไปหน้าจอโฮมเพื่อเล่นแบบแอป</p>
     </div>
     <div class="panel" id="goPanel" style="display:none">
       <h1>OH NO!</h1>
@@ -168,6 +165,7 @@
         <div class="stat hi"><div class="label">Best</div><div class="value" id="goBest">0</div></div>
       </div>
       <button class="btn" id="restartBtn">PLAY AGAIN</button>
+      <p id="homeTip">📱 เพิ่มไปหน้าจอโฮมเพื่อเล่นแบบแอป</p>
     </div>
   </div>
 </div>
@@ -380,6 +378,30 @@
     setTimeout(() => gameOver('Tower crumbled'), 1100);
   }
 
+  /** If any crate center/corner crosses the phone viewport, force collapse. */
+  const EDGE_MARGIN = 6;
+
+  function towerOffScreen() {
+    if (blocks.length < 2 || !W) return false;
+    const piv = basePivot();
+    const c = Math.cos(towerLean), s = Math.sin(towerLean);
+    const left = EDGE_MARGIN, right = W - EDGE_MARGIN;
+    for (const b of blocks) {
+      // Sample block center + four corners in world space after lean rotation
+      const pts = [
+        [b.x + b.w / 2, b.y + b.h / 2],
+        [b.x, b.y], [b.x + b.w, b.y],
+        [b.x, b.y + b.h], [b.x + b.w, b.y + b.h],
+      ];
+      for (const [px, py] of pts) {
+        const lx = px - piv.x, ly = py - piv.y;
+        const wx = piv.x + lx * c - ly * s;
+        if (wx < left || wx > right) return true;
+      }
+    }
+    return false;
+  }
+
   function updateBestUI() {
     document.getElementById('bestVal').textContent = best;
     document.getElementById('startBest').textContent = best;
@@ -466,7 +488,7 @@
     const target = recomputeLeanTarget();
     leanVel += (target - towerLean) * 0.7;
     towerLean += (target - towerLean) * 0.75;
-    if (Math.abs(towerLean) >= MAX_LEAN || Math.abs(target) >= MAX_LEAN) {
+    if (Math.abs(towerLean) >= MAX_LEAN || Math.abs(target) >= MAX_LEAN || towerOffScreen()) {
       startCrumble(Math.sign(towerLean || target) || 1);
       swingDir *= -1; return;
     }
@@ -489,6 +511,7 @@
     nr.classList.toggle('show', isNew);
     startPanel.style.display = 'none'; goPanel.style.display = 'block';
     overlay.classList.add('show');
+    refreshHomeTip();
     if (reason !== 'Tower crumbled') sfxGameOver();
   }
 
@@ -749,6 +772,12 @@
       leanVel += (target - towerLean) * 0.1 * dt;
       leanVel *= Math.pow(0.88, dt);
       towerLean += leanVel * dt;
+      // Physical lean fail (existing) + viewport-edge fail (phone)
+      if (blocks.length > 1) {
+        if (Math.abs(towerLean) >= MAX_LEAN || Math.abs(target) >= MAX_LEAN || towerOffScreen()) {
+          startCrumble(Math.sign(towerLean || target) || 1);
+        }
+      }
     }
     if (phase === 'collapse') {
       for (const r of rubble) {
@@ -800,6 +829,7 @@
   });
   document.getElementById('restartBtn').addEventListener('click', (e) => {
     e.stopPropagation(); resumeAudio();
+    markHomeTipSeen();
     overlay.classList.remove('show'); goPanel.style.display = 'none'; startPanel.style.display = 'block';
     resetGame();
   });
@@ -808,6 +838,7 @@
       e.preventDefault(); resumeAudio();
       if (phase === 'menu') { overlay.classList.remove('show'); resetGame(); }
       else if (phase === 'gameover') {
+        markHomeTipSeen();
         overlay.classList.remove('show'); goPanel.style.display = 'none'; startPanel.style.display = 'block'; resetGame();
       } else onDrop(e);
     }
@@ -826,11 +857,18 @@
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
   }
-  // Hide tip after a while once seen
-  try {
-    if (localStorage.getItem('crateTowerTipSeen') === '1') homeTip.style.display = 'none';
-    else setTimeout(() => { localStorage.setItem('crateTowerTipSeen', '1'); }, 12000);
-  } catch (_) {}
+  // PWA tip lives on game-over only (avoids overlapping title UI)
+  function refreshHomeTip() {
+    try {
+      if (localStorage.getItem('crateTowerTipSeen') === '1') homeTip.classList.remove('show');
+      else homeTip.classList.add('show');
+    } catch (_) { homeTip.classList.add('show'); }
+  }
+  function markHomeTipSeen() {
+    try { localStorage.setItem('crateTowerTipSeen', '1'); } catch (_) {}
+    homeTip.classList.remove('show');
+  }
+  refreshHomeTip();
 
   updateBestUI();
   resize();
